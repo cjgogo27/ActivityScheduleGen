@@ -1,0 +1,80 @@
+# ── Python ──────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# ── Raw & Processed Data ─────────────────────────────────
+# NHTS state-level raw data
+Arizona/nhts-azdot-17/
+Arizona/nhts-azdot-17.zip
+Arizona/processed_data*/
+
+California/nhts17-caltrans-tsdc-download/
+California/nhts17-caltrans-tsdc-download.zip
+California/nhts17_ca_addon_raw_survey.zip
+California/data_person/
+California/processed_data*/
+
+Georgia/2017-tsdc-nhts-georgia-add-on-download/
+Georgia/2017-tsdc-nhts-georgia-add-on-download.zip
+Georgia/processed_data*/
+
+Oklahoma/2017-tsdc-nhts-incog-add-on-download/
+Oklahoma/2017-tsdc-nhts-incog-add-on-download.zip
+Oklahoma/processed_data*/
+Oklahoma/processed_code_v1/
+
+# Stage training data
+Trajectory_Generation_multi_agent/stage1_training_data*/
+Trajectory_Generation_multi_agent/eval_data/
+Trajectory_Generation_multi_agent/household_id/
+
+# ── Model Checkpoints & Outputs ──────────────────────────
+finetune/models/Llama-3.1-8B-Instruct/
+finetune/models/Qwen3-8B/
+finetune/models/logs/
+finetune/Llama/
+
+Trajectory_Generation_multi_agent/stage2_sft_*/
+Trajectory_Generation_multi_agent/stage3_grpo_*/
+Trajectory_Generation_multi_agent/output*/
+Trajectory_Generation_multi_agent/output_trajectories*/
+Trajectory_Generation_multi_agent/output_three_agent/
+Trajectory_Generation_multi_agent/output_trajectories_three_agent*/
+Trajectory_Generation_multi_agent/results/
+Trajectory_Generation_multi_agent/logs/
+
+Trajectory_Generation/output*/
+Trajectory_Generation/output_copb/
+
+# ── Evaluation Results (large result files) ──────────────
+evaluation/evaluation_results*/
+evaluation/evaluation_results1/
+evaluation/visualization_analysis*/
+
+# ── Analysis Outputs ─────────────────────────────────────
+data_analysis_visual/graphs/
+data_analysis_visual/analysis_report/
+
+# ── CoPB (separate repo) ─────────────────────────────────
+CoPB/
+
+# ── Figures (binary, large) ─────────────────────────────
+Figures/*.png
+
+# ── Misc ─────────────────────────────────────────────────
+.DS_Store
+*.log
+*.tmp
+*.swp
+.env
+tensorboard_logs/
+runs/
+wandb/
