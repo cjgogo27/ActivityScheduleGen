@@ -1,38 +1,3 @@
-"""
-Stage 1: Chain-of-Thought Distillation for Critic & Editor Agent
-==================================================================
-
-Method: Distill Editor's constraint-checking and editing reasoning
-
-Architecture: Unified 2-Stage Generator (merged Planner + Realiser) → Editor
-
-Target Agent: Critic & Editor ONLY
-
-Approach:
-- Unified Generator: Generates initial schedule with 2-stage prompt:
-    Stage 1: Determine activity sequence
-    Stage 2: Assign times to activities
-- Teacher Model: GPT-5.1
-- Input: Person Profile + Initial Schedule (from unified generator) + Ground Truth
-- Task: Show Editor's CoT process
-  1. Check 5 constraint types (Physical, Logical, Common Sense, Temporal, Coherence)
-  2. Identify violations
-  3. Apply edit operations: ADD/DELETE/SHIFT/REPLACE activities
-  4. Output refined schedule
-  
-Output Format:
-  [THOUGHT] 
-    - Constraint checking (5 types)
-    - Edit operations (if violations found)
-    - Final verification
-  [/THOUGHT]
-  
-  [JSON]
-    - Final schedule
-  [/JSON]
-
-This creates training data for Editor agent's constraint-based refinement process.
-"""
 
 
 import json
@@ -44,25 +9,18 @@ from datetime import datetime
 from typing import Dict, List, Optional, Any
 from collections import defaultdict
 
-# Note: We now use a unified generator instead of separate Planner/Realizer
 
-# ==================== Configuration ====================
-API_KEY = "sk-qyl51vYITpOoElayZ5gmNuIlsU2p3iNQnawX9G0RyMzOICym"
+API_KEY = "sk-qyl51vYITpONuIlsU2p3iNQnawX9GMzOICym"
 BASE_URL = "https://api.nuwaflux.com/v1"
 TIMEOUT = 60
-TEACHER_MODEL = "gpt-5.1"  # Must match the model used in pipeline
+TEACHER_MODEL = "gpt-5.2"  
 
-# Input files
-# IMPORTANT: Person and Schedule files MUST be from the SAME state for user_id matching!
-# Using California data (has both person profiles and schedules)
 PERSON_FILE = r"/data/alice/cjtest/FinalTraj_KDD/California/processed_data/california_person_static.json"
 GROUND_TRUTH_FILE = r"/data/alice/cjtest/FinalTraj_KDD/California/processed_data/all_user_schedules.json"
 
-# Output directory
 OUTPUT_DIR = r"/data/alice/cjtest/FinalTraj_KDD/Trajectory_Generation_multi_agent/stage1_training_data copy 3"
 OUTPUT_FILE = "teacher_generated_training_data.jsonl"
 
-# ==================== Utility Functions ====================
 def create_openai_client():
     return OpenAI(api_key=API_KEY, base_url=BASE_URL, timeout=TIMEOUT)
 
@@ -71,9 +29,8 @@ def load_json(file_path: str):
         return json.load(f)
 
 def extract_person_profile(person_data: Dict) -> Dict[str, Any]:
-    """Extract relevant user profile information"""
     return {
-        'user_id': person_data.get('user_id', 'Unknown'),  # Key field for matching
+        'user_id': person_data.get('user_id', 'Unknown'), 
         'age_range': person_data.get('age_range', 'Unknown'),
         'gender': person_data.get('gender', 'Unknown'),
         'race': person_data.get('race', 'Unknown'),
@@ -90,16 +47,8 @@ def extract_person_profile(person_data: Dict) -> Dict[str, Any]:
 
 
 def generate_initial_schedule_unified(client: OpenAI, user_profile: Dict, max_retries: int = 3) -> Optional[List[Dict]]:
-    """
-    Unified schedule generator (merged Planner + Realiser).
-    Two-stage prompt: 1) Generate activity sequence, 2) Assign times.
-    
-    Returns: Complete schedule with times, or None if failed.
-    """
-    
     profile_str = json.dumps(user_profile, indent=2, ensure_ascii=False)
-    
-    # Two-stage unified prompt
+
     prompt = f"""You are a daily schedule planner. Generate a realistic 24-hour schedule for this person.
 
 **PERSON PROFILE:**
@@ -173,7 +122,6 @@ Generate the schedule now:"""
                 max_tokens=2048
             )
             
-            # Extract response
             output = None
             if isinstance(response, str):
                 output = response
@@ -188,12 +136,10 @@ Generate the schedule now:"""
             if not output:
                 continue
             
-            # Extract schedule JSON from [SCHEDULE]...[/SCHEDULE]
             import re
             schedule_match = re.search(r'\[SCHEDULE\](.*?)\[/SCHEDULE\]', output, re.DOTALL)
             if schedule_match:
                 schedule_str = schedule_match.group(1).strip()
-                # Remove markdown code blocks if present
                 schedule_str = re.sub(r'^```json\s*', '', schedule_str)
                 schedule_str = re.sub(r'\s*```$', '', schedule_str)
                 
@@ -214,28 +160,11 @@ Generate the schedule now:"""
 
 
 def construct_teacher_prompt(user_profile: Dict, initial_schedule: List[Dict], ground_truth_schedule: List[Dict]) -> str:
-    """
-    Chain-of-Thought Distillation for Critic & Editor Agent ONLY.
     
-    Task: Given an initial schedule (from unified generator), show the Editor's reasoning:
-      1. Check 5 constraint types
-      2. Identify violations
-      3. Apply edit operations (ADD/DELETE/SHIFT/REPLACE)
-      4. Output final schedule (matching ground truth)
-    
-    This trains the Editor to perform constraint-based iterative refinement.
-    
-    NOTE: We use unified generator (merged Planner+Realiser) to create initial schedule,
-          but we DON'T save their CoT - only Editor's CoT is saved.
-    """
-    
-    # Format user profile
     profile_str = json.dumps(user_profile, indent=2, ensure_ascii=False)
     
-    # Format initial schedule (from Planner+Realizer)
     initial_schedule_str = json.dumps(initial_schedule, indent=2, ensure_ascii=False)
     
-    # Format ground truth (target for Editor to match)
     gt_schedule_str = json.dumps(ground_truth_schedule, indent=2, ensure_ascii=False)
     
     prompt = f"""You are a Critic & Editor Agent. Your job is to validate and refine a daily schedule.
@@ -294,35 +223,11 @@ def generate_training_sample(
     ground_truth_schedule: List[Dict],
     max_retries: int = 3
 ) -> Optional[Dict]:
-    """
-    Generate one training sample with Editor's CoT reasoning.
-    
-    Steps:
-      1. Use unified generator (merged Planner+Realiser) with two-stage prompt (don't save CoT)
-      2. Use Teacher model to generate Editor's CoT (CHECK + EDIT to reach GT)
-    
-    Returns:
-        {
-            "user_profile": {...},
-            "initial_schedule": [...],  # From unified generator
-            "ground_truth_schedule": [...],
-            "teacher_output": "[THOUGHT]...[/THOUGHT][JSON]...[/JSON]",  # Editor's CoT only
-            "generation_time": "...",
-            "success": True/False
-        }
-    """
-    
-    # Step 1: Generate initial schedule using unified generator
-    print(f"    🔄 Generating initial schedule (2-stage: activities → times)...")
     initial_schedule = generate_initial_schedule_unified(client, user_profile)
     
     if not initial_schedule:
-        print(f"    ❌ Unified generator failed to produce schedule")
         return None
     
-    print(f"    ✓ Generated initial schedule: {len(initial_schedule)} activities")
-    
-    # Step 2: Generate Editor's CoT using teacher model
     prompt = construct_teacher_prompt(user_profile, initial_schedule, ground_truth_schedule)
     
     for attempt in range(max_retries):
@@ -340,10 +245,9 @@ def generate_training_sample(
                     }
                 ],
                 temperature=0.7,
-                max_tokens=3072  # Increased: reasoning (640) + detailed output (2400+)
+                max_tokens=3072 
             )
-            
-            # Handle different response types
+
             teacher_output = None
             if isinstance(response, str):
                 teacher_output = response
@@ -361,8 +265,6 @@ def generate_training_sample(
             
             if teacher_output is None:
                 teacher_output = ""
-            
-            # Validate output format - check for Editor sections only
             required_sections = ["[THOUGHT]", "[/THOUGHT]", "[JSON]", "[/JSON]"]
             all_present = all(section in teacher_output for section in required_sections)
             
@@ -411,17 +313,14 @@ def generate_training_sample(
 
 
 def save_training_sample(sample: Dict, output_file: str):
-    """Append one training sample to JSONL file"""
     with open(output_file, 'a', encoding='utf-8') as f:
         f.write(json.dumps(sample, ensure_ascii=False) + '\n')
 
 
 def save_metadata_and_cot_separately(sample: Dict, metadata_file: str, cot_file: str):
-    """Save metadata and CoT separately for efficient storage"""
     if not sample.get('success', False):
         return
-    
-    # Extract metadata (static information)
+
     metadata = {
         'user_id': sample['user_profile']['user_id'],
         'user_profile': sample['user_profile'],
@@ -430,13 +329,11 @@ def save_metadata_and_cot_separately(sample: Dict, metadata_file: str, cot_file:
         'generation_time': sample['generation_time']
     }
     
-    # Extract CoT only
     cot_sample = {
         'user_id': sample['user_profile']['user_id'],
         'teacher_output': sample['teacher_output']
     }
     
-    # Save to separate files
     with open(metadata_file, 'a', encoding='utf-8') as f:
         f.write(json.dumps(metadata, ensure_ascii=False) + '\n')
     
@@ -445,41 +342,15 @@ def save_metadata_and_cot_separately(sample: Dict, metadata_file: str, cot_file:
 
 
 def main():
-    print("=" * 80)
-    print(" STAGE 1: CRITIC & EDITOR AGENT - CoT DISTILLATION")
-    print(" Teacher Model: GPT-5.1")
-    print(" Target: Editor's constraint-checking + editing operations")
-    print(" Pipeline: Unified Generator (2-stage) → Editor (only save Editor's CoT)")
-    print("=" * 80)
-    
-    # Create output directory
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     output_filepath = os.path.join(OUTPUT_DIR, OUTPUT_FILE)
     metadata_filepath = os.path.join(OUTPUT_DIR, "metadata.jsonl")
     cot_filepath = os.path.join(OUTPUT_DIR, "cot_only.jsonl")
-    
-    # Note: Do NOT clear existing files - we're appending new samples
-    if os.path.exists(output_filepath):
-        print(f"\n✓ Will append to existing output files (no duplication)")
-    else:
-        print(f"\n✓ Creating new output files")
-    
-    # Initialize OpenAI client for all agents
-    print(f"\n🤖 Initializing OpenAI client...")
     client = create_openai_client()
-    print(f"  ✓ OpenAI client ready")
-    print(f"  ✓ Will use unified generator (2-stage: activities → times) for each person")
-    print(f"  ✓ Teacher Model ({TEACHER_MODEL}) ready for Editor CoT")
-    
-    # Load data
-    print(f"\n📂 Loading data...")
+
     persons_list = load_json(PERSON_FILE)
     ground_truth_data = load_json(GROUND_TRUTH_FILE)
     
-    print(f"  ✓ Loaded {len(persons_list)} person records")
-    print(f"  ✓ Loaded {len(ground_truth_data)} ground truth schedules")
-    
-    # Create mapping: user_id -> ground_truth_schedule
     gt_dict = {}
     for entry in ground_truth_data:
         user_id = entry.get('user_id')
@@ -487,9 +358,6 @@ def main():
         if user_id and schedule:
             gt_dict[user_id] = schedule
     
-    print(f"  ✓ Mapped {len(gt_dict)} user schedules")
-    
-    # Match persons with ground truth schedules
     matched_samples = []
     for person in persons_list:
         user_id = person.get('user_id')
@@ -498,11 +366,7 @@ def main():
             schedule = gt_dict[user_id]
             matched_samples.append((profile, schedule))
     
-    print(f"\n🎯 Found {len(matched_samples)} matched samples (person + ground truth)")
-    
-    # Check for existing generated samples to avoid duplicates
     existing_user_ids = set()
-    # Check metadata file first (has user_profile with user_id)
     if os.path.exists(metadata_filepath):
         try:
             with open(metadata_filepath, 'r', encoding='utf-8') as f:
@@ -515,41 +379,23 @@ def main():
         except Exception as e:
             print(f"  ⚠️  Error reading existing samples: {str(e)[:100]}")
             pass
-    
-    # Filter out already generated samples
+
     if existing_user_ids:
         matched_samples = [(p, s) for p, s in matched_samples if p['user_id'] not in existing_user_ids]
         print(f"  → {len(matched_samples)} new samples available after filtering")
-    
-    # Limit to reasonable number
-    # Target: 5 samples for high-quality SFT training
-    max_samples = 5  # Generate 5 new samples without duplication
+
+    max_samples = 5  
     if len(matched_samples) > max_samples:
         import random
         random.seed(42)
         matched_samples = random.sample(matched_samples, max_samples)
-        print(f"  → Sampling {max_samples} for generation")
-        print(f"  💰 Estimated cost: ~${max_samples * 0.026:.2f} (¥{max_samples * 0.026 * 7.2:.2f})")
-        print(f"  ⏱️  Estimated time: ~{int(max_samples * 4 / 60)} minutes")
-    else:
-        print(f"  💰 Estimated cost: ~${len(matched_samples) * 0.026:.2f}")
     
-    # Generate training data
     successful = 0
     failed = 0
-    
-    print(f"\n🚀 Starting generation with Unified 2-Stage Pipeline...")
-    print(f"   Step 1: Generate activity sequence + times (2-stage unified prompt, CoT not saved)")
-    print(f"   Step 2: Teacher Model generates Editor's CoT ✅ SAVED")
-    print(f"{'─' * 80}\n")
+
     
     for idx, (profile, schedule) in enumerate(matched_samples, 1):
         user_id = profile['user_id']
-        print(f"[{idx}/{len(matched_samples)}] Processing {user_id}")
-        print(f"  Profile: {profile['age_range']}, {profile['employment_status']}, {profile['primary_activity']}")
-        print(f"  Ground Truth: {len(schedule)} activities")
-        
-        # Generate training sample (runs Planner→Realizer→Editor)
         sample = generate_training_sample(client, profile, schedule)
         
         if sample and sample['success']:
@@ -558,10 +404,8 @@ def main():
             successful += 1
             print(f"  ✓ Generated and saved")
             
-            # Show snippet of output
             output = sample['teacher_output']
             
-            # Extract [THOUGHT] snippet for display
             thought_start = output.find('[THOUGHT]')
             thought_end = output.find('[/THOUGHT]')
             if thought_start >= 0 and thought_end > thought_start:
@@ -570,40 +414,18 @@ def main():
         else:
             failed += 1
             if sample:
-                save_training_sample(sample, output_filepath)  # Save even failed attempts for analysis
-            print(f"  ❌ Failed")
-        
+                save_training_sample(sample, output_filepath)  
         print()
         
-        # Rate limiting
         if idx < len(matched_samples):
-            time.sleep(1)  # Adjust based on API rate limits
+            time.sleep(1) 
     
-    # Summary
-    print(f"\n{'=' * 80}")
-    print(f" GENERATION COMPLETE")
-    print(f"{'=' * 80}")
-    print(f"  Total samples: {len(matched_samples)}")
-    print(f"  Successful: {successful}")
-    print(f"  Failed: {failed}")
-    if len(matched_samples) > 0:
-        print(f"  Success rate: {successful/len(matched_samples)*100:.1f}%")
-    else:
-        print(f"  Success rate: N/A (no matched samples found)")
-    print(f"\n  📁 Output saved to: {output_filepath}")
-    print(f"{'=' * 80}\n")
-    
-    # Show example
     if successful > 0:
-        print("📝 Example training sample:")
-        print("─" * 80)
         with open(output_filepath, 'r', encoding='utf-8') as f:
             first_line = f.readline()
             example = json.loads(first_line)
             if example['success']:
-                print(f"User ID: {example['user_profile']['user_id']}")
-                print(f"\nTeacher Output:\n{example['teacher_output'][:800]}...")
-                print("─" * 80)
+                pass
 
 
 if __name__ == "__main__":
